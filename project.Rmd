@@ -1,0 +1,138 @@
+---
+title: "Project 2"
+author: "Darren Cohen, Andrew Gutierrez"
+date: "May 10, 2018"
+output: html_document
+---
+
+<!-- change echo=FALSE to echo=TRUE to show code -->
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(prompt=TRUE, comment="", echo=TRUE)
+```
+
+For our project we will be using drug death data to see if there is correlation between aspects of a subject's life and their drug usage.
+
+```{r}
+dat=read.csv("https://raw.githubusercontent.com/AndrewGutierrez/drugdeaths/master/Accidental_Drug_Related_Deaths__2012-2017.csv")
+```
+
+***
+
+###Data Preprocessing
+
+Before we can start working with the data, we need to clean and process it. To begin we will remove some of the rows that will not be useful for our project. This will include the 'CaseNumber', 'AmendedMannerofDeath', 'DescriptionofInjury', and 'MannerofDeath'. The 'CaseNumber' column will be removed as all values in this are unique, as the are used to identify each row. The 'AmendedMannerofDeath' and 'MannerofDeath' columns both consist of the same values for each row, thus provding information that is not needed. The 'DescriptionofInjury' column will be removed because most of the values are missing, and the values that are there are mostly unique so we can not fill in the missing values.
+
+```{r}
+dat$CaseNumber=NULL
+dat$AmendedMannerofDeath=NULL
+dat$MannerofDeath=NULL
+dat$DescriptionofInjury=NULL
+```
+
+Another step we need to take is to see if we have any NA values in our data set. We can do this by looking at the number of rows in the data set minus the number of complete cases.
+
+```{r}
+nrow(dat)-sum(complete.cases(dat))
+```
+
+After seeing that there are incomplete cases in our data set, we need to further identify which column is causing these three incomplete cases. A way this can be done is by using the 'summmary()' function.
+
+```{r}
+summary(dat)
+```
+
+From the summary we see that the 'Age' column has these three NA values, to fix this we will be replacing these values with the average age from our data set.
+
+```{r}
+avg_age=round(mean(dat[!is.na(dat$Age),]$Age))
+dat[is.na(dat$Age),]$Age =avg_age
+```
+
+Looking at the summary, we can also see if there are other aspects of our data set that need to be refined. From looking at the 'Race' column we saw that there were some rows that contained empty strings. There were also rows that contained the value "Unkown", because of this we decided to convert the empty string values into "Unknown". We will also be converting the empty strings in 'Sex' into either "Male" or "Female" by randomly picking one of the two genders. Looking at the 'Location' column, there were three main values: "Residence", "Hospital", and "Other", the remaining values in this column will be converted into "Other".
+
+```{r}
+#not sure why running this code twice gives an error
+dat$Race=ifelse(dat$Race=="", "Unknown", levels(dat$Race)[dat$Race])
+
+dat$Sex=ifelse(dat$Sex=="", sample(c("Male", "Female"), 1, replace=TRUE), levels(dat$Sex)[dat$Sex])
+
+dat$Location=ifelse(dat$Location!="Residence" & dat$Location!="Hospital", "Other", levels(dat$Location)[dat$Location])
+
+dat$InjuryPlace=ifelse(dat$InjuryPlace=="", "Unknown", levels(dat$InjuryPlace)[dat$InjuryPlace])
+```
+
+Another thing we want to do is make additional features that we can use when using machine learning to make predictions. These features will have "Yes" or "No" values based on if another feature matches a classification we are looking for. Along with creating these additional features, the type of drug detected is marked in the respected column with a "Y" or "y" meaning the drug was present, and a value of an empty string if the drug was not present. We will convert all "y" values into "Y" so that the indication of yes will match. The empty string values will be converted into "N" to indicate that the drug was not present.  
+
+```{r}
+hospital_death=ifelse(dat$Location=="Hospital", "Yes", "No")
+dat$hospital=hospital_death
+
+Residence_death=ifelse(dat$Location=="Residence", "Yes", "No")
+dat$Residence=Residence_death
+
+heroin=ifelse(dat$Heroin=="Y" | dat$Heroin=="y", "Y", "N")
+dat$Heroin=heroin
+
+cocaine=ifelse(dat$Cocaine=="Y" | dat$Cocaine=="y", "Y", "N")
+dat$Cocaine=cocaine
+
+Oxycodone=ifelse(dat$Oxycodone=="Y" | dat$Oxycodone=="y", "Y", "N")
+dat$Oxycodone=Oxycodone
+
+Oxymorphone=ifelse(dat$Oxymorphone=="Y" | dat$Oxymorphone=="y", "Y", "N")
+dat$Oxymorphone=Oxymorphone
+
+EtOH=ifelse(dat$EtOH=="Y" | dat$EtOH=="y", "Y", "N")
+dat$EtOH=EtOH
+
+Hydrocodone=ifelse(dat$Hydrocodone=="Y" | dat$Hydrocodone=="y", "Y", "N")
+dat$Hydrocodone=Hydrocodone
+
+Amphet=ifelse(dat$Amphet=="Y" | dat$Amphet=="y", "Y", "N")
+dat$Amphet=Amphet
+
+Methadone=ifelse(dat$Methadone=="Y" | dat$Methadone=="y", "Y", "N")
+dat$Methadone=Methadone
+
+Tramad=ifelse(dat$Tramad=="Y" | dat$Tramad=="y", "Y", "N")
+dat$Tramad=Tramad
+
+Benzodiazepine=ifelse(dat$Benzodiazepine=="Y" | dat$Benzodiazepine=="y" | dat$Benzodiazepine==" Y", "Y", "N")
+dat$Benzodiazepine=Benzodiazepine
+
+Fentanyl=ifelse(dat$Fentanyl=="", "N", "Y")
+dat$Fentanyl=Fentanyl
+```
+
+***
+
+###Data Exploration
+
+***
+
+###Prediction
+
+```{R}
+fit=glm(Location ~ Sex + Race, data=dat, family = binomial)
+
+```
+
+```{r}
+probs = predict(fit, newdata=dat, type="response")
+```
+
+```{r}
+library(rpart)
+library(rpart.plot)
+
+```
+
+```{r}
+fit = rpart(Sex ~ Age, data=dat, method="class")
+```
+
+
+
+
+
+

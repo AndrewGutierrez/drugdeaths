@@ -10,7 +10,7 @@ output: html_document
 knitr::opts_chunk$set(prompt=TRUE, comment="", echo=TRUE)
 ```
 
-For our project we will be using drug death data to see if there is correlation between aspects of a subject's life and their drug usage.
+For our project we will be using drug death data to see if there is correlation between aspects of a subject's life and their drug usage. We will also be looking into the kinds of drugs that were present in the subject's system at the time of their death. Another aspect we are interested in looking at is where the person took the drugs compared to where they died, as the data has an attribute showing where they took the drug and another showing their location when they passed away.
 
 ```{r}
 dat=read.csv("https://raw.githubusercontent.com/AndrewGutierrez/drugdeaths/master/Accidental_Drug_Related_Deaths__2012-2017.csv")
@@ -108,17 +108,68 @@ dat$Fentanyl=Fentanyl
 
 ###Data Exploration
 
+Before we use our data set to make predictions, we need to explore the data to see what trends we can see or to find any aspects of the data we may want to explore further.
+
+```{r}
+plot(density(dat$Age), main="Density of age in the data set", col="cadetblue")
+grid()
+```
+
+From making a density plot of the ages in the data set, we see that there is a good range of ages from 20 to 65. From this we also see that our average for ages will be around 42.
+
+```{r}
+dat$years=substr(dat$Date, 7, nchar(dat$Date))
+barplot(table(dat$years), main="Number of deaths per year", col="coral")
+```
+
+If we take a look at a barplot of how often the years appear in the data set, we see that there is an upward trend in the number of deaths per year. This is something that we may want to exxplore further, as the number of deaths per year due to drug deaths is increasing. 
+
+```{r}
+par(mar=c(3,10,3,3))
+barplot(sort(table(dat$Race)), main="Number of deaths per race", col="coral", las=1, horiz=TRUE)
+```
+
+By looking at the number of deaths per race in the data set, we see if race may be something we would want to include as a feature when making predictions in our models.
+
+```{r}
+barplot(table(dat$Sex), main="Deaths per sex", col="coral", ylim=c(0,3000))
+```
+
+By looking at a barplot of the number of deaths per sex, we see that there are about three times as many males in the data set as there are females.
+
+```{r}
+table(dat$InjuryPlace)
+```
+
+By looking at a table of where a subject took the drugs, we see that there is a great varity of places listed. If we want to be able to use this attribute for making predictions we may want to bin this data as we did for where a person died. 
+
+```{r}
+table(dat$Location)
+```
+
+Building off of tthe table where a subject took the drugs, we have a table showing where the subjects died. This could be a great attribute to use in determining which types of drugs lead to subjects getting some kind of treatment to try and save their life. 
+
+```{r}
+tbl=sapply(dat[, 14:24], table)
+par(mar=c(3,8,3,3))
+barplot(sort(tbl[2,]), main="Number of recorded uses per drug type", las=1, horiz=TRUE, col="coral", xlim=c(0, 2500))
+```
+
+Since the data set contains various columns showing if a certain drug present in the subject's system, we can use this to see which kinds of drugs are being used. The plot shows that there are five different drugs used in our data set of about 4100 rows. This means that there will be subjects that had more than one drug at a time in their system. This could be useful in looking into if combination of drugs contribute to a person's death more than just those drugs by themselves.
+
 ***
 
 ###Prediction
 
 ```{R}
-fit=glm(Location ~ Sex + Race, data=dat, family = binomial)
+dat$years=as.numeric(dat$years)
+fit=glm(years ~ Age, data=dat)
 
 ```
 
 ```{r}
 probs = predict(fit, newdata=dat, type="response")
+probs=round(probs)
 ```
 
 ```{r}

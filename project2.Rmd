@@ -1,0 +1,400 @@
+---
+title: "Drug Related Deaths in Connecticut"
+author: "Darren Cohen, Andrew Gutierrez"
+date: "May 13, 2018"
+output: html_document
+---
+
+<!-- change echo=FALSE to echo=TRUE to show code -->
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(prompt=TRUE, comment="", echo=TRUE)
+```
+
+For our project we will be using drug death data to see if there is a correlation between aspects of a subject's life and their drug usage. We will also be looking into the kinds of drugs that were present in the subject's system at the time of their death. Another aspect we are interested in looking at is where the person took the drugs compared to where they died, as the data has an attribute showing where they took the drug and another showing their location when they passed away.
+
+```{r}
+dat=read.csv("https://raw.githubusercontent.com/AndrewGutierrez/drugdeaths/master/Accidental_Drug_Related_Deaths__2012-2017.csv")
+source("https://raw.githubusercontent.com/grbruns/cst383/master/lin-regr-util.R")
+```
+
+Next we need to load the libraries we are going to use to build our models.
+
+```{r}
+library(rpart)
+library(rpart.plot)
+library(e1071)
+library(ggplot2)
+#install.packages("devtools")
+library(devtools)
+#install_github("easyGgplot2", "kassambara")
+library(easyGgplot2)
+```
+
+***
+
+###Data Preprocessing
+
+Before we can start working with the data, we need to clean and process it. To begin we will remove some of the rows that will not be useful for our project. This will include the 'CaseNumber', 'AmendedMannerofDeath', 'DescriptionofInjury', and 'MannerofDeath'. The 'CaseNumber' column will be removed as all values in this are unique, as the are used to identify each row. The 'AmendedMannerofDeath' and 'MannerofDeath' columns both consist of the same values for each row, thus provding information that is not needed. The 'DescriptionofInjury' column will be removed because most of the values are missing, and the values that are there are mostly unique so we can not fill in the missing values.
+
+```{r}
+dat$CaseNumber=NULL
+dat$AmendedMannerofDeath=NULL
+dat$MannerofDeath=NULL
+dat$DescriptionofInjury=NULL
+```
+
+Another step we need to take is to see if we have any NA values in our data set. We can do this by looking at the number of rows in the data set minus the number of complete cases.
+
+```{r}
+nrow(dat)-sum(complete.cases(dat))
+```
+
+After seeing that there are incomplete cases in our data set, we need to further identify which column is causing these three incomplete cases. A way this can be done is by using the 'summmary()' function.
+
+```{r}
+#summary(dat)
+```
+
+From the summary we see that the 'Age' column has these three NA values, to fix this we will be replacing these values with the average age from our data set.
+
+```{r}
+avg_age=round(mean(dat[!is.na(dat$Age),]$Age))
+dat[is.na(dat$Age),]$Age =avg_age
+```
+
+Looking at the summary, we can also see if there are other aspects of our data set that need to be refined. From looking at the 'Race' column we saw that there were some rows that contained empty strings. There were also rows that contained the value "Unkown", because of this we decided to convert the empty string values into "Unknown". We will also be converting the empty strings in 'Sex' into either "Male" or "Female" by randomly picking one of the two genders. Looking at the 'Location' column, there were three main values: "Residence", "Hospital", and "Other", the remaining values in this column will be converted into "Other".
+
+```{r}
+
+dat$Race=ifelse(dat$Race=="", "Unknown", levels(dat$Race)[dat$Race])
+
+dat$Sex=ifelse(dat$Sex=="", sample(c("Male", "Female"), 1, replace=TRUE), levels(dat$Sex)[dat$Sex])
+
+dat$Location=ifelse(dat$Location!="Residence" & dat$Location!="Hospital", "Other", levels(dat$Location)[dat$Location])
+
+dat$InjuryPlace=ifelse(dat$InjuryPlace=="", "Unknown", levels(dat$InjuryPlace)[dat$InjuryPlace])
+
+dat=dat[dat$Date!="",]
+```
+
+Another thing we want to do is make additional features that we can use when using machine learning to make predictions. These features will have "Yes" or "No" values based on if another feature matches a classification we are looking for. Along with creating these additional features, the type of drug detected is marked in the respected column with a "Y" or "y" meaning the drug was present, and a value of an empty string if the drug was not present. We will convert all "y" values into "Y" so that the indication of yes will be consistant. The empty string values will be converted into "N" to indicate that the drug was not present.  
+
+```{r}
+hospital_death=ifelse(dat$Location=="Hospital", "Yes", "No")
+dat$hospital=hospital_death
+
+Residence_death=ifelse(dat$Location=="Residence", "Yes", "No")
+dat$Residence=Residence_death
+
+heroin=ifelse(dat$Heroin=="Y" | dat$Heroin=="y", "Y", "N")
+dat$Heroin=heroin
+
+cocaine=ifelse(dat$Cocaine=="Y" | dat$Cocaine=="y", "Y", "N")
+dat$Cocaine=cocaine
+
+Oxycodone=ifelse(dat$Oxycodone=="Y" | dat$Oxycodone=="y", "Y", "N")
+dat$Oxycodone=Oxycodone
+
+Oxymorphone=ifelse(dat$Oxymorphone=="Y" | dat$Oxymorphone=="y", "Y", "N")
+dat$Oxymorphone=Oxymorphone
+
+EtOH=ifelse(dat$EtOH=="Y" | dat$EtOH=="y", "Y", "N")
+dat$EtOH=EtOH
+
+Hydrocodone=ifelse(dat$Hydrocodone=="Y" | dat$Hydrocodone=="y", "Y", "N")
+dat$Hydrocodone=Hydrocodone
+
+Amphet=ifelse(dat$Amphet=="Y" | dat$Amphet=="y", "Y", "N")
+dat$Amphet=Amphet
+
+Methadone=ifelse(dat$Methadone=="Y" | dat$Methadone=="y", "Y", "N")
+dat$Methadone=Methadone
+
+Tramad=ifelse(dat$Tramad=="Y" | dat$Tramad=="y", "Y", "N")
+dat$Tramad=Tramad
+
+Benzodiazepine=ifelse(dat$Benzodiazepine=="Y" | dat$Benzodiazepine=="y" | dat$Benzodiazepine==" Y", "Y", "N")
+dat$Benzodiazepine=Benzodiazepine
+
+Fentanyl=ifelse(dat$Fentanyl=="", "N", "Y")
+dat$Fentanyl=Fentanyl
+dat$hospital=as.factor(dat$hospital)
+
+dat$Death.County=as.character(dat$Death.County)
+dat$Death.County=ifelse(dat$Death.County==" FAIRFIELD", "FAIRFIELD", dat$Death.County)
+dat$Death.County=ifelse(dat$Death.County==""| dat$Death.County=="USA", "UNKNOWN", dat$Death.County)
+```
+
+Since we created new features and updated others from the original data set, we will also need to convert some of our features into numeric values or factors so that we can use them to create our models.
+
+```{r}
+dat$month=substr(dat$Date, 1, 2)
+dat$Date=as.character(dat$Date)
+dat$years=substr(dat$Date, 7, nchar(dat$Date))
+
+dat$years=as.numeric(dat$years)
+dat$month=as.numeric(dat$month)
+
+dat$Heroin=as.factor(dat$Heroin)
+dat$Sex=as.factor(dat$Sex)
+dat$Death.County=as.factor(dat$Death.County)
+```
+
+***
+
+###Data Exploration
+
+Before we use our data set to make predictions, we need to explore the data to see what trends we can see or to find any aspects of the data we may want to explore further.
+
+```{r}
+plot(density(dat$Age), main="Density of ages in the data set", col="blue", xlab="Age")
+grid()
+```
+
+From making a density plot of the ages in the data set, we see that there is a good range of ages from 20 to 65. From this we also see that our average for ages will be around 42.
+
+***
+
+Next we will look to see if there is a rising trend in the number of drug deaths per year from our data set.
+
+```{r}
+barplot(table(dat$years), main="Number of deaths per year", col="coral")
+```
+
+If we take a look at a barplot of how often the years appear in the data set, we see that there is an upward trend in the number of deaths per year. This is something that we may want to explore further, as the number of deaths per year due to drug deaths is increasing, and this may be because of the types of drugs taken.
+
+***
+
+Next we will look into if rave will be a good feature to use in determining the types of drugs a subject had in their system.
+
+```{r}
+par(mar=c(3,10,3,3))
+barplot(sort(table(dat$Race)), main="Number of deaths per race", col="coral", las=1, horiz=TRUE)
+```
+
+By looking at the number of deaths per race in the data set, we see that race may not be something we would want to include as a feature when making predictions in our models. Since most of the data set is of those who are white, including the race of a subject in our models may not have any impact on the predictions we make.
+
+***
+
+Another feature that should be looked at is the ratio of gender in the data set. If there is a good ratio in the data set, it may be worth looking into if the gender of the subject can help in determining the type of drugs they used.
+
+```{r}
+barplot(table(dat$Sex), main="Deaths per sex", col="coral", ylim=c(0,3000))
+```
+
+By looking at a barplot of the number of deaths per sex, we see that there are about three times as many males in the data set as there are females. This is not an ideal ratio, but with over one thousand females in the data set we may see an indication that gender may play a role in the type of drug taken.
+
+```{r}
+table(dat$Location)
+```
+
+Since we will also try to predict if a person ended up dying in a hospital, it is good to get a baseline of how many subjects in total died in the hospital, we do this through table showing where the subjects died. This could be a great attribute to use in determining which types of drugs lead to subjects getting some kind of treatment to try and save their life. 
+
+***
+
+As we are looking into how drugs related to a subjects death, we should look at how many drugs a subject took, as well as if the total number of drugs is greater than number of rows in our data set. 
+
+```{r}
+tbl=sapply(dat[, 14:24], table)
+par(mar=c(3,8,3,3))
+barplot(sort(tbl[2,]), main="Number of recorded uses per drug type", las=1, horiz=TRUE, col="coral", xlim=c(0, 2500))
+```
+
+Since the data set contains various columns showing if a certain drug present in the subject's system, we can use this to see which kinds of drugs are being used. The plot shows that there are five different drugs used in our data set of about 4100 rows. This means that there will be subjects that had more than one drug at a time in their system. This could be useful in looking into if combination of drugs contribute to a person's death more than just those drugs by themselves.
+
+Another feature that may be useful is getting a count of how many drugs each subject used, since we saw that the number of drugs accounted for exceeded our number of subjects, this would be able to confirm this. 
+
+```{r}
+numDrugs=data.frame(matrix(0, ncol=1, nrow=nrow(dat)))
+names(numDrugs)[1]="count"
+for(row in 1:nrow(dat)){
+  count = 0
+for(col in 14:24){
+  if(dat[row, col]== 'Y')
+  count = count + 1
+}
+  numDrugs[row, 1]=count
+}
+
+dat = cbind(dat, numDrugs)
+
+```
+
+```{r}
+dat$range=ifelse(dat$Age>=30 & dat$Age < 40, "thirty", 0)
+dat$range=ifelse(dat$Age>=30 & dat$Age < 40, "thirty", dat$range)
+dat$range=ifelse(dat$Age>=40 & dat$Age < 50, "forty", dat$range)
+dat$range=ifelse(dat$Age>=50 & dat$Age < 60, "fifty", dat$range)
+dat$range=ifelse(dat$Age>=60 & dat$Age < 70, "sixty", dat$range)
+dat$range=ifelse(dat$Age>=70 & dat$Age < 80, "seventy", dat$range)
+dat$range=ifelse(dat$Age>=80 & dat$Age < 90, "ninety", dat$range)
+dat$range=ifelse(dat$Age>=20 & dat$Age < 30, "twenty", dat$range)
+dat$range=ifelse(dat$Age>=10 & dat$Age < 20, "teen", dat$range)
+```
+
+Now that we have this feature, we can create a plot that will show if subjects used more than one drug grouping them by their age group.
+
+```{r}
+ggplot2.barplot(data=dat, xName="range", groupName="count")
+```
+
+From this plot we can see that there were a great deal of subjects that had more than one drug in their system at the time of their death. This can also be represented by a different plot that may be easier to see the amount of subjects that used the most drugs. 
+
+```{r}
+qplot(count, Age, color = count, data = dat)
+```
+
+From this plot we see that the majority of subjects had 0-4 of the drugs searched for in their system at the time of their death. Those who had zero of these drugs were counted as having a drug that the doctors could not clearly identify. We also see from this plot that there were five subjects that had six of these drugs in their system at the time of their death.
+
+***
+
+###Making predictions
+
+Before we start making any kind of predictions based on our data set, we need to split our data into training and data sets.
+
+```{r}
+set.seed(1)
+split = split_data(dat)
+tr_dat = split[[1]]
+te_dat = split[[2]]
+```
+
+***
+
+####Model 1
+
+For our first model, we will look at if we can use the subject's 'Death.City' and 'month' attributes to be able to predict if they died in a hospital. We will be pridicting if a subject died in the hospital using logistic regression. But before we build our model, we need to create a baseline of the what our accuracy would be by simply saying that everyone died in the hospital. 
+
+```{r}
+table(te_dat$hospital)/nrow(te_dat)
+```
+
+From this we see that if we always said that a subject did not die in the hospital we would be correct 68.5% of the time. With now having a baseline accuracy, we can start building our model.
+
+```{r}
+fit = glm(hospital ~ Death.City + month + count, data=tr_dat,
+family=binomial)
+```
+
+Now that our model is built, we can make predictions. We will also be looking at a confusion matrix and an accuracy rate so we can see how well our model did at predicting is a subject died in the hospital.
+
+```{r}
+predicted = predict(fit, newdata=tr_dat, type="response")
+predicts = as.numeric(predicted > 0.5)
+actuals = tr_dat$hospital
+predicts=ifelse(predicts==0, "No", "Yes")
+conf_mtx = table(predicts, actuals)
+conf_mtx
+mean(predicts==actuals)
+```
+
+By looking at the accuracy of our model using logistic regression, we see that our accuracy is 72%. Using logistic regression, we improved our accuracy by 3.5% compared to our baseline accuracy. We can also see if changing our threshold from 0.5 to something else will improve our accuracy rate. This can be done through a histogram of the different thresholds and seeing which side has the majority of the values.
+
+```{r}
+par(mfrow=c(1,2))
+hist(predicted[actuals=="No"], breaks=10,  xlim=c(0,1), main="Prediction of not hospital", col="coral3", xlab="Predictions")
+hist(predicted[actuals=="Yes"], breaks=10, main="Prediction of hospital death", col="coral3", xlab="Predictions")
+```
+
+From the histograms we see that the best threshold would be between 0.5 and 0.6. This means that our threshold of 0.5 is extremely close to the threshold that would give the highest accuracy rate.
+
+***
+
+####Model 2
+
+In our second model, we will again try to predict if the subject died in the hospital, but this time we will be using a classification tree to make our model and compare how well the classification tree does against the logistic regresion model.
+
+```{r}
+fit = rpart(hospital ~ month+ Death.City + Residence.City + count, data=tr_dat, method="class")
+prp(fit, extra=106, varlen=-10, main="classification tree for public/private univ.", box.col=c("palegreen", "pink")[fit$frame$yval])
+```
+
+Taking a look at our decision tree, there are a number of different 'Death.City' and 'Residence.City' values that affect the way that our classification tree was built.
+
+```{r}
+predicted = predict(fit, te_dat, type="class")
+actual = te_dat$hospital 
+table(actual, predicted) 
+mean(actual == predicted)
+```
+
+By being able to see a confusion matrix and the accuracy rate of the model using a classification tree, we see that the accuracy rate of our model is 77.1%. Our accuracy rate from using this model is an 8.6% increase compared to our original baseline. This model is also a 5.1% increase compared to our logistic regression model, meaning that it is best to use a classification tree to make predictions of if a subject died in the hospital when looking at the 'Death.City' and 'month' features.
+
+***
+
+###Predicting Heroin Use
+
+Now we will look at seeing if we can predict if a subject had heroin in their system at the time of their death. Before creating models, we will again need to establish a baseline accuracy rate that we will be comparing our models to.  
+
+```{r}
+table(te_dat$Heroin)/nrow(te_dat)
+```
+
+From this table we see that our accuracy rate of simply guessing yes if a subject had heroin in their system is 52.5%.
+
+####Model 1
+
+The first model we will be making to predict if a subject died with heroin in their system will use the 'years', 'Death.County', 'Age', and 'Sex' attributes. We will be using Naive Bayes to make build our first model and make our predictions.
+
+```{r}
+fit = naiveBayes(Heroin ~ years + Death.County + Age + Sex + count, data=tr_dat)
+predicts = suppressWarnings(predict(fit, newdata=te_dat))
+```
+
+To see how well our model did on the test data we will look at a confusion matrix and an accuracy percentage.
+
+```{r}
+actual=te_dat$Heroin
+conf_mtx = table(actual, predicts) 
+conf_mtx
+mean(predicts == te_dat$Heroin)
+```
+
+By calculating our accuracy rate with the Naive Bayes model, we see that our accuracy was 62.8%. This is a 10.3% increase compared to our baseline accuracy rate. 
+
+To understand how certain features are affecting our model, we can look at a barplot to understand if the feature gives a higher probablility in determining our outcome.
+
+```{r}
+fv = te_dat[1,c("Heroin","Death.County")]
+prob_cp_ok = fit$tables$Death.County[1,fv$Death.County]
+prob_cp_hd = fit$tables$Death.County[2,fv$Death.County]
+
+par(mar=c(3,8,3,3))
+barplot(rbind(fit$tables$Death.County[1,], fit$tables$Death.County[2,]),las=1, horiz=TRUE, beside = TRUE, col=c("coral3", "cadetblue"), main="Probability of Heroin Caused Death per County", xlim=c(0.0, 0.3))
+legend("topright", inset=0.05, legend=c("No Heroin", "Heroin Detected"), fill=c("coral3", "cadetblue"), cex=1)
+```
+
+From this barplot, we see that some counties have higher probablities of a subject having heroin in their system compared to others. For example, Windham has an about 3.5% chance of a subject being from Windham given they had heroin in their system. However in Tolland, a subject that had taken heroin only has an about 2% chance of being from Tolland. This barplot also shows that some counties are less likely to have subjects having heroin in their system compated to not having heroin. 
+
+***
+
+####Model 2
+
+Now we will look at how a classification tree will do at making predictions for heroin use.
+
+```{r}
+fit = rpart(Heroin ~ years + Age + Death.County +Sex + count, data=tr_dat, method="class")
+```
+
+After we build our model, we will look at how our classification tree looks like. 
+
+```{r}
+prp(fit, extra=106, varlen=-10, main="classification tree for public/private univ.", box.col=c("palegreen", "pink")[fit$frame$yval])
+```
+
+Now that we have our model built, we can use it to make predictions and compare how it does against our Naive Bayes model. We will compare the two models by looking at a confusion matrix and accuracy rate. 
+
+```{r}
+predicted = predict(fit, te_dat, type="class")
+actual = te_dat$Heroin 
+table(actual, predicted) 
+mean(actual == predicted)
+```
+
+Our accuracy rate using the classification tree is 63.4%. This is an increase of 10.9% compared to our baseline accuracy, but is only a 0.6% increase over our Naive Bayes model. While this model is the better of the two compared to our original accuracy rate baseline, it is not that great of an improvement over our Naive Bayes model.
+
+***
+
+###Conslusion
+
+Our goal at the begining of the project was to be able to predict if a subject died in the hospital and if we could predict if the subject used heroin based on features in the data set. We were able to successfully increase the accuracy rate of predicting if the subject did not die in the hospital by getting an accuracy rate of 77.1%. This was an 8.6% increase compared to our original baseline of someone not dying in the hospital from just looking at the number of rows were this was true. For our second prediction, we were able to improve our accuracy by using a classification tree with an increase of 10.9%. This is a significant improvement over our baseline model, and by looking at the classification tree of our second model, we see that 'count' was an important feature to use in getting this accuracy from the tree. In both predictions, using a classification tree proved to give the best accuracy rates. 
